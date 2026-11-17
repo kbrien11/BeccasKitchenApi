@@ -13,7 +13,16 @@ class UserSerializer(serializers.ModelSerializer):
             "email",
             "first_name",
             "last_name",
+            "subscription_plan",
         ]
+        read_only_fields = ["subscription_plan"]
+
+
+class SubscriptionPlanSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ["subscription_plan"]
+        extra_kwargs = {"subscription_plan": {"required": True}}
 
 
 class RegisterSerializer(serializers.ModelSerializer):
