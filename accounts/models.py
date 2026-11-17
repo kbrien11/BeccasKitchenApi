@@ -38,9 +38,20 @@ class CustomUserManager(BaseUserManager):
 
 class User(AbstractUser):
 
+    class SubscriptionPlan(models.TextChoices):
+        FREE = "free", "Free"
+        BASIC = "basic", "Basic"
+        PREMIUM = "premium", "Premium"
+
     username = None
 
     email = models.EmailField(unique=True)
+
+    subscription_plan = models.CharField(
+        max_length=20,
+        choices=SubscriptionPlan.choices,
+        default=SubscriptionPlan.FREE,
+    )
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = []

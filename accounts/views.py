@@ -12,6 +12,7 @@ from .serializers import (
     RegisterSerializer,
     LoginSerializer,
     UserSerializer,
+    SubscriptionPlanSerializer,
 )
 
 
@@ -79,3 +80,26 @@ class CurrentUserView(APIView):
         return Response({
             "user": UserSerializer(request.user).data
         })
+
+
+class SubscriptionPlanView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request):
+        serializer = SubscriptionPlanSerializer(
+            request.user,
+            data=request.data
+        )
+
+        if serializer.is_valid():
+            user = serializer.save()
+
+            return Response({
+                "message": "Subscription plan updated.",
+                "user": UserSerializer(user).data
+            }, status=status.HTTP_200_OK)
+
+        return Response(
+            serializer.errors,
+            status=status.HTTP_400_BAD_REQUEST
+        )
