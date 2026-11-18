@@ -403,3 +403,30 @@ class CookieAuthTests(APITestCase):
         Token.objects.filter(pk=token.pk).update(created=timezone.now() - timedelta(days=15))
         self.client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
         self.assertEqual(self.client.get("/api/auth/me/").status_code, 401)
+
+
+class ProxiedOriginCsrfTests(APITestCase):
+    """Netlify proxies /api to Render, so the browser's Origin is the Netlify site, not the API host."""
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+
+        self.browser = APIClient(enforce_csrf_checks=True)
+        User.objects.create_user(email="parent@example.test", password="test-pass-123")
+        self.browser.post("/api/auth/login/", {"email": "parent@example.test", "password": "test-pass-123"}, format="json")
+        self.browser.get("/api/auth/csrf/")
+        self.csrf = self.browser.cookies["csrftoken"].value
+
+    def post_child(self, origin):
+        return self.browser.post(
+            "/api/auth/me/children/", {"name": "Ava"}, format="json",
+            HTTP_X_CSRFTOKEN=self.csrf, HTTP_ORIGIN=origin,
+        )
+
+    def test_netlify_site_is_trusted(self):
+        self.assertEqual(self.post_child("https://beccaskitchen.netlify.app").status_code, 201)
+
+    def test_other_sites_are_rejected(self):
+        response = self.post_child("https://evil.example")
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("Origin checking failed", str(response.data["detail"]))

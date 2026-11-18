@@ -51,15 +51,24 @@ if not SECRET_KEY:
         raise ImproperlyConfigured("Set the SECRET_KEY environment variable (required when DEBUG is off).")
     SECRET_KEY = "django-insecure-local-development-only"
 
-ALLOWED_HOSTS = ["localhost", "127.0.0.1", "beccaskitchenapi.onrender.com","https://beccaskitchen.netlify.app/"]
+# Hostnames only (no https://, no paths). Netlify forwards /api here under Render's own
+# hostname, so the Netlify domain doesn't belong in this list.
+ALLOWED_HOSTS = ["localhost", "127.0.0.1", "beccaskitchenapi.onrender.com","https://beccaskitchen.netlify.app"]
 # Render provides the service's hostname; extra hosts can be added with ALLOWED_HOSTS="a.com,b.com".
 if config("RENDER_EXTERNAL_HOSTNAME", default=""):
     ALLOWED_HOSTS.append(config("RENDER_EXTERNAL_HOSTNAME"))
 ALLOWED_HOSTS += env_list("ALLOWED_HOSTS")
 
-# Sites allowed to call the API with cookies (the Netlify UI, which proxies /api here).
-# Set FRONTEND_ORIGINS="https://your-site.netlify.app" on Render.
-FRONTEND_ORIGINS = (["http://localhost:5174"] if DEBUG else []) + env_list("FRONTEND_ORIGINS")
+# Sites allowed to send cookie-authenticated requests (CSRF trusted origins / CORS).
+# The browser's Origin is the Netlify site even though Netlify proxies /api to Render,
+# so it must be listed here or every POST/PATCH/DELETE fails with 403.
+# Format: scheme + host, no trailing slash. More can be added with FRONTEND_ORIGINS="https://a,https://b".
+PRODUCTION_ORIGINS = ["https://beccaskitchen.netlify.app"]
+FRONTEND_ORIGINS = list(dict.fromkeys(
+    PRODUCTION_ORIGINS
+    + (["http://localhost:5174"] if DEBUG else [])
+    + [origin.rstrip("/") for origin in env_list("FRONTEND_ORIGINS")]  # tolerate "https://x.app/"
+))
 
 # Render terminates HTTPS in front of gunicorn.
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
