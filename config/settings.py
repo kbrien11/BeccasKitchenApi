@@ -12,6 +12,8 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
+import os
+import dj_database_url
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -26,7 +28,21 @@ SECRET_KEY = 'django-insecure-+my+3v$^t$=7r^1=9_oi(9kksqcpie^09q6_vn*j1ec*w#$&!y
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [
+    "pools-f8ip.onrender.com",
+    "poolboxes.netlify.app",
+    "192.168.1.161",
+        "127.0.0.1",
+        "localhost",
+        "reviewqrapi.onrender.com",
+        "reviewlyft.netlify.app",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+]
+
+CSRF_TRUSTED_ORIGINS = [
+    "https://poolboxes.netlify.app",
+]
 
 
 # Application definition
@@ -80,14 +96,17 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql_psycopg2",
-        "NAME": "beccaKitchen",
-        "USER": "postgres",
-        "PASSWORD": "mbdask1013",
-    },
-}
+raw_url = config("DATABASE_URL", default=None)
+DATABASES = {"default": dj_database_url.parse(raw_url, conn_max_age=0)}
+
+# DATABASES = {
+#     "default": {
+#         "ENGINE": "django.db.backends.postgresql_psycopg2",
+#         "NAME": "beccaKitchen",
+#         "USER": "postgres",
+#         "PASSWORD": "mbdask1013",
+#     },
+# }
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
