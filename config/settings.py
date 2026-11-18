@@ -1,3 +1,4 @@
+from datetime import timedelta
 """
 Django settings for config project.
 
@@ -136,9 +137,24 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:5174",
 ]
 
+# --- Auth cookie & CSRF -------------------------------------------------------
+# The UI calls the API through its own origin (/api, proxied), so cookies are first-party.
+AUTH_COOKIE_NAME = "bk_auth"
+AUTH_COOKIE_SECURE = not DEBUG  # HTTPS-only outside local development.
+AUTH_COOKIE_SAMESITE = "Lax"
+AUTH_TOKEN_TTL = timedelta(days=14)
+
+CSRF_TRUSTED_ORIGINS = ["http://localhost:5174"]
+CSRF_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_HTTPONLY = False  # The UI reads it to send the X-CSRFToken header.
+
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework.authentication.TokenAuthentication",
+        # Browser app: token in an httpOnly cookie, with CSRF checks.
+        "accounts.authentication.CookieTokenAuthentication",
+        # Scripts/tests: "Authorization: Token <key>" header.
+        "accounts.authentication.ExpiringTokenAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.AllowAny",

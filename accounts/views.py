@@ -3,10 +3,14 @@ from django.shortcuts import render
 # Create your views here.
 
 from rest_framework import status
+from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
-from rest_framework.authtoken.models import Token
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import ensure_csrf_cookie
+
+from .auth_cookies import clear_auth_cookie, issue_token, set_auth_cookie
 
 from .serializers import (
     RegisterSerializer,
@@ -34,13 +38,12 @@ class RegisterView(APIView):
         if serializer.is_valid():
             user = serializer.save()
 
-            token, _ = Token.objects.get_or_create(user=user)
-
-            return Response({
+            response = Response({
                 "message": "Account created successfully.",
-                "token": token.key,
                 "user": UserSerializer(user).data
             }, status=status.HTTP_201_CREATED)
+            # The token goes in an httpOnly cookie, never in the response body.
+            return set_auth_cookie(response, issue_token(user))
 
         return Response(
             serializer.errors,
@@ -57,13 +60,12 @@ class LoginView(APIView):
         if serializer.is_valid():
             user = serializer.validated_data["user"]
 
-            token, _ = Token.objects.get_or_create(user=user)
-
-            return Response({
+            response = Response({
                 "message": "Login successful.",
-                "token": token.key,
                 "user": UserSerializer(user).data
             }, status=status.HTTP_200_OK)
+            # The token goes in an httpOnly cookie, never in the response body.
+            return set_auth_cookie(response, issue_token(user))
 
         return Response(
             serializer.errors,
@@ -72,14 +74,35 @@ class LoginView(APIView):
 
 
 class LogoutView(APIView):
-    permission_classes = [IsAuthenticated]
+    """Revoke the token (if signed in) and always clear the auth cookie."""
+
+    permission_classes = [AllowAny]
+
+    def perform_authentication(self, request):
+        # An expired/unknown token shouldn't stop us clearing the cookie.
+        # (A CSRF failure still raises PermissionDenied, so logout can't be forged.)
+        try:
+            request.user
+        except AuthenticationFailed:
+            pass
 
     def post(self, request):
-        request.user.auth_token.delete()
+        if request.auth is not None:
+            request.auth.delete()
 
-        return Response({
-            "message": "Logged out successfully."
-        }, status=status.HTTP_200_OK)
+        response = Response({"message": "Logged out successfully."}, status=status.HTTP_200_OK)
+        return clear_auth_cookie(response)
+
+
+@method_decorator(ensure_csrf_cookie, name="get")
+class CsrfView(APIView):
+    """GET: sets the csrftoken cookie the browser app sends back as X-CSRFToken."""
+
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        return Response({"detail": "CSRF cookie set."})
 
 
 class CurrentUserView(APIView):
