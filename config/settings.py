@@ -51,7 +51,7 @@ if not SECRET_KEY:
         raise ImproperlyConfigured("Set the SECRET_KEY environment variable (required when DEBUG is off).")
     SECRET_KEY = "django-insecure-local-development-only"
 
-ALLOWED_HOSTS = ["localhost", "127.0.0.1", "beccaskitchenapi.onrender.com"]
+ALLOWED_HOSTS = ["localhost", "127.0.0.1", "beccaskitchenapi.onrender.com","https://beccaskitchen.netlify.app/"]
 # Render provides the service's hostname; extra hosts can be added with ALLOWED_HOSTS="a.com,b.com".
 if config("RENDER_EXTERNAL_HOSTNAME", default=""):
     ALLOWED_HOSTS.append(config("RENDER_EXTERNAL_HOSTNAME"))
