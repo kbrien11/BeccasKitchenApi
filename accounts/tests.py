@@ -310,3 +310,96 @@ class TastingsApiTests(APITestCase):
         self.assertEqual(self.client.post(url, {"meal_id": 1, "reaction": "loved", "tried_on": "2026-09-01"}, format="json").status_code, 404)
         self.assertEqual(self.client.delete(f"{url}{tasting.pk}/").status_code, 404)
         self.assertEqual(self.client.get("/api/auth/me/tastings/").data["tastings"], [])
+
+
+class CookieAuthTests(APITestCase):
+    """The browser app's flow: httpOnly auth cookie + CSRF token, no token in JS."""
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+
+        self.browser = APIClient(enforce_csrf_checks=True)
+        self.user = User.objects.create_user(email="parent@example.test", password="test-pass-123")
+
+    def login(self):
+        return self.browser.post("/api/auth/login/", {"email": "parent@example.test", "password": "test-pass-123"}, format="json")
+
+    def csrf(self):
+        self.browser.get("/api/auth/csrf/")
+        return self.browser.cookies["csrftoken"].value
+
+    def test_login_sets_httponly_cookie_and_hides_token(self):
+        response = self.login()
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("token", response.data)
+
+        cookie = response.cookies["bk_auth"]
+        self.assertTrue(cookie["httponly"])
+        self.assertEqual(cookie["samesite"], "Lax")
+        self.assertEqual(cookie.value, Token.objects.get(user=self.user).key)
+
+        me = self.browser.get("/api/auth/me/")
+        self.assertEqual(me.status_code, 200)
+        self.assertEqual(me.data["user"]["email"], "parent@example.test")
+
+    def test_register_sets_cookie(self):
+        response = self.browser.post(
+            "/api/auth/register/",
+            {"email": "new@example.test", "first_name": "N", "last_name": "P", "password": "long-enough-1"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertNotIn("token", response.data)
+        self.assertTrue(response.cookies["bk_auth"]["httponly"])
+
+    def test_unsafe_requests_need_csrf_token(self):
+        self.login()
+        url = "/api/auth/me/favorites/"
+
+        blocked = self.browser.post(url, {"meal_id": 1}, format="json")
+        self.assertEqual(blocked.status_code, 403)
+        self.assertIn("CSRF", str(blocked.data["detail"]))
+
+        allowed = self.browser.post(url, {"meal_id": 1}, format="json", HTTP_X_CSRFTOKEN=self.csrf())
+        self.assertEqual(allowed.status_code, 201)
+
+    def test_logout_revokes_token_and_clears_cookie(self):
+        self.login()
+        response = self.browser.post("/api/auth/logout/", HTTP_X_CSRFTOKEN=self.csrf())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.cookies["bk_auth"].value, "")
+        self.assertFalse(Token.objects.filter(user=self.user).exists())
+        self.assertEqual(self.browser.get("/api/auth/me/").status_code, 401)
+
+    def test_logout_without_csrf_is_rejected(self):
+        self.login()
+        self.assertEqual(self.browser.post("/api/auth/logout/").status_code, 403)
+        self.assertTrue(Token.objects.filter(user=self.user).exists())
+
+    def test_expired_token_is_rejected_and_replaced_on_login(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        self.login()
+        old = Token.objects.get(user=self.user)
+        Token.objects.filter(pk=old.pk).update(created=timezone.now() - timedelta(days=15))
+
+        self.assertEqual(self.browser.get("/api/auth/me/").status_code, 401)
+        self.assertFalse(Token.objects.filter(pk=old.pk).exists())
+
+        # Logging out with the dead cookie still clears it.
+        self.assertEqual(self.browser.post("/api/auth/logout/", HTTP_X_CSRFTOKEN=self.csrf()).status_code, 200)
+
+        self.login()
+        self.assertNotEqual(Token.objects.get(user=self.user).key, old.key)
+
+    def test_expired_header_token_is_rejected(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        token = Token.objects.create(user=self.user)
+        Token.objects.filter(pk=token.pk).update(created=timezone.now() - timedelta(days=15))
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+        self.assertEqual(self.client.get("/api/auth/me/").status_code, 401)
