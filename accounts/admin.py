@@ -1,6 +1,6 @@
 from django.contrib import admin, messages
 
-from .models import Child, Favorite, Order, OrderEvent, OrderItem
+from .models import Child, Favorite, MealTasting, Order, OrderEvent, OrderItem
 from .orders import DELIVERY_FIELDS, OrderError, change_status, mark_paid, record_field_changes
 
 
@@ -109,7 +109,14 @@ class FavoriteAdmin(admin.ModelAdmin):
     search_fields = ["user__email"]
 
 
+class MealTastingInline(admin.TabularInline):
+    model = MealTasting
+    extra = 0
+    fields = ["tried_on", "meal_id", "reaction", "note"]
+
+
 @admin.register(Child)
 class ChildAdmin(admin.ModelAdmin):
     list_display = ["name", "user", "allergens", "created_at"]
     search_fields = ["name", "user__email"]
+    inlines = [MealTastingInline]

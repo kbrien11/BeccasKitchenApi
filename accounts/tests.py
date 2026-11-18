@@ -267,3 +267,46 @@ class ChildrenApiTests(APITestCase):
         self.client.credentials()
         data = self.client.get("/api/auth/allergens/").data["allergens"]
         self.assertEqual(data["tree_nut"], "Tree nuts")
+
+
+class TastingsApiTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(email="parent@example.test", password="test-pass-123")
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {Token.objects.create(user=self.user).key}")
+        self.child = self.user.children.create(name="Ava", allergens=["milk"])
+        self.url = f"/api/auth/me/children/{self.child.pk}/tastings/"
+
+    def test_log_list_and_delete_tastings(self):
+        first = self.client.post(self.url, {"meal_id": 1, "reaction": "disliked", "tried_on": "2026-09-01"}, format="json")
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(first.data["meal_name"], "Sunny Sweet Potato")
+        # Same meal again later: kept as history, not overwritten.
+        self.client.post(self.url, {"meal_id": 1, "reaction": "loved", "tried_on": "2026-10-01", "note": "Asked for more"}, format="json")
+
+        tastings = self.client.get(self.url).data["tastings"]
+        self.assertEqual([t["reaction"] for t in tastings], ["loved", "disliked"])
+        self.assertEqual(tastings[0]["note"], "Asked for more")
+
+        all_tastings = self.client.get("/api/auth/me/tastings/").data["tastings"]
+        self.assertEqual(len(all_tastings), 2)
+        self.assertEqual(all_tastings[0]["child_id"], self.child.pk)
+
+        self.assertEqual(self.client.delete(f"{self.url}{first.data['id']}/").status_code, 204)
+        self.assertEqual(len(self.client.get(self.url).data["tastings"]), 1)
+
+    def test_validation(self):
+        bad_meal = self.client.post(self.url, {"meal_id": 999, "reaction": "loved", "tried_on": "2026-09-01"}, format="json")
+        bad_reaction = self.client.post(self.url, {"meal_id": 1, "reaction": "meh", "tried_on": "2026-09-01"}, format="json")
+        future = self.client.post(self.url, {"meal_id": 1, "reaction": "loved", "tried_on": "2999-01-01"}, format="json")
+        self.assertEqual([bad_meal.status_code, bad_reaction.status_code, future.status_code], [400, 400, 400])
+
+    def test_cannot_touch_another_familys_child(self):
+        other = User.objects.create_user(email="other@example.test", password="test-pass-123")
+        theirs = other.children.create(name="Theo")
+        tasting = theirs.tastings.create(meal_id=1, reaction="loved", tried_on="2026-09-01")
+        url = f"/api/auth/me/children/{theirs.pk}/tastings/"
+
+        self.assertEqual(self.client.get(url).status_code, 404)
+        self.assertEqual(self.client.post(url, {"meal_id": 1, "reaction": "loved", "tried_on": "2026-09-01"}, format="json").status_code, 404)
+        self.assertEqual(self.client.delete(f"{url}{tasting.pk}/").status_code, 404)
+        self.assertEqual(self.client.get("/api/auth/me/tastings/").data["tastings"], [])

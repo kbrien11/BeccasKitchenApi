@@ -16,6 +16,9 @@ from .views import (
     AllergenListView,
     ChildListView,
     ChildDetailView,
+    ChildTastingListView,
+    ChildTastingDetailView,
+    TastingListView,
 )
 
 urlpatterns = [
@@ -45,4 +48,11 @@ urlpatterns = [
     path("me/children/", ChildListView.as_view(), name="child-list"),
     path("me/children/<int:child_id>/", ChildDetailView.as_view(), name="child-detail"),
     path("allergens/", AllergenListView.as_view(), name="allergens"),
+    path("me/children/<int:child_id>/tastings/", ChildTastingListView.as_view(), name="child-tasting-list"),
+    path(
+        "me/children/<int:child_id>/tastings/<int:tasting_id>/",
+        ChildTastingDetailView.as_view(),
+        name="child-tasting-detail"
+    ),
+    path("me/tastings/", TastingListView.as_view(), name="tasting-list"),
 ]

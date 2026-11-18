@@ -3,7 +3,8 @@ from django.contrib.auth import authenticate
 from rest_framework import serializers
 
 from .allergens import ALLERGENS
-from .models import Child, Favorite, Order, OrderEvent, OrderItem, User
+from .menu import MENU
+from .models import Child, Favorite, MealTasting, Order, OrderEvent, OrderItem, User
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -187,3 +188,28 @@ class ChildSerializer(serializers.ModelSerializer):
 
     def validate_allergens(self, value):
         return sorted(set(value))
+
+
+class MealTastingSerializer(serializers.ModelSerializer):
+    child_id = serializers.IntegerField(read_only=True)
+    meal_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = MealTasting
+        fields = ["id", "child_id", "meal_id", "meal_name", "reaction", "note", "tried_on", "created_at"]
+        read_only_fields = ["id", "child_id", "meal_name", "created_at"]
+
+    def get_meal_name(self, tasting):
+        return MENU.get(tasting.meal_id, {}).get("name", f"Meal {tasting.meal_id}")
+
+    def validate_meal_id(self, value):
+        if value not in MENU:
+            raise serializers.ValidationError("That meal isn't on the menu.")
+        return value
+
+    def validate_tried_on(self, value):
+        from django.utils import timezone
+
+        if value > timezone.localdate():
+            raise serializers.ValidationError("Tried-on date can't be in the future.")
+        return value

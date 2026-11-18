@@ -255,3 +255,26 @@ class Child(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.user})"
+
+
+class MealTasting(models.Model):
+    """One time a child tried a meal, and how it went. Kept as a history (a meal can be tried many times)."""
+
+    class Reaction(models.TextChoices):
+        LOVED = "loved", "Loved it"
+        OKAY = "okay", "It was okay"
+        DISLIKED = "disliked", "Not a fan"
+        REACTION = "reaction", "Had a reaction"
+
+    child = models.ForeignKey(Child, on_delete=models.CASCADE, related_name="tastings")
+    meal_id = models.PositiveIntegerField()
+    reaction = models.CharField(max_length=10, choices=Reaction.choices)
+    note = models.CharField(max_length=500, blank=True)
+    tried_on = models.DateField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-tried_on", "-created_at"]
+
+    def __str__(self):
+        return f"{self.child.name} - meal {self.meal_id}: {self.reaction}"

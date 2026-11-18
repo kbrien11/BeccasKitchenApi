@@ -17,7 +17,9 @@ from .serializers import (
     OrderCreateSerializer,
     OrderSerializer,
     ChildSerializer,
+    MealTastingSerializer,
 )
+from .models import MealTasting
 from .allergens import ALLERGENS
 from .models import Favorite, Order
 from .orders import OrderError, balance_for, change_status, place_order
@@ -277,3 +279,52 @@ class ChildDetailView(APIView):
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         child.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ChildTastingListView(APIView):
+    """GET: a child's food history (newest first). POST: log that they tried a meal."""
+
+    permission_classes = [IsAuthenticated]
+
+    def _child(self, request, child_id):
+        return request.user.children.filter(pk=child_id).first()
+
+    def get(self, request, child_id):
+        child = self._child(request, child_id)
+        if child is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response({"tastings": MealTastingSerializer(child.tastings.all(), many=True).data})
+
+    def post(self, request, child_id):
+        child = self._child(request, child_id)
+        if child is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        serializer = MealTastingSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(child=child)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class ChildTastingDetailView(APIView):
+    """DELETE: remove a logged tasting (e.g. logged by mistake)."""
+
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, child_id, tasting_id):
+        tasting = MealTasting.objects.filter(
+            pk=tasting_id, child_id=child_id, child__user=request.user
+        ).first()
+        if tasting is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        tasting.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class TastingListView(APIView):
+    """GET: every tasting for all of the user's children, so the menu can show them in one request."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        tastings = MealTasting.objects.filter(child__user=request.user)
+        return Response({"tastings": MealTastingSerializer(tastings, many=True).data})
