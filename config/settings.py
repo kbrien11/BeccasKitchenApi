@@ -14,6 +14,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 from pathlib import Path
 import os
 import dj_database_url
+from django.core.exceptions import ImproperlyConfigured
 from decouple import config
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -31,27 +32,37 @@ STATICFILES_DIRS = [
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-+my+3v$^t$=7r^1=9_oi(9kksqcpie^09q6_vn*j1ec*w#$&!y'
+def env_list(name, default=""):
+    """Comma-separated env var -> list, e.g. "a.com, b.com" -> ["a.com", "b.com"]."""
+    return [item.strip() for item in config(name, default=default).split(",") if item.strip()]
+
+
+# Render sets RENDER=true. Debug is off there unless explicitly enabled, and on locally.
+ON_RENDER = config("RENDER", default=False, cast=bool)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = config("DEBUG", default=not ON_RENDER, cast=bool)
 
-ALLOWED_HOSTS = [
-    "pools-f8ip.onrender.com",
-    "poolboxes.netlify.app",
-    "192.168.1.161",
-        "127.0.0.1",
-        "localhost",
-        "reviewqrapi.onrender.com",
-        "reviewlyft.netlify.app",
-        "http://localhost:5174",
-        "http://127.0.0.1:5174",
-]
+# SECURITY WARNING: keep the secret key used in production secret!
+# Locally a throwaway dev key is fine; in production SECRET_KEY must come from the environment.
+SECRET_KEY = config("SECRET_KEY", default="")
+if not SECRET_KEY:
+    if not DEBUG:
+        raise ImproperlyConfigured("Set the SECRET_KEY environment variable (required when DEBUG is off).")
+    SECRET_KEY = "django-insecure-local-development-only"
 
-CSRF_TRUSTED_ORIGINS = [
-    "https://poolboxes.netlify.app",
-]
+ALLOWED_HOSTS = ["localhost", "127.0.0.1", "beccaskitchenapi.onrender.com","https://beccaskitchen.netlify.app/"]
+# Render provides the service's hostname; extra hosts can be added with ALLOWED_HOSTS="a.com,b.com".
+if config("RENDER_EXTERNAL_HOSTNAME", default=""):
+    ALLOWED_HOSTS.append(config("RENDER_EXTERNAL_HOSTNAME"))
+ALLOWED_HOSTS += env_list("ALLOWED_HOSTS")
+
+# Sites allowed to call the API with cookies (the Netlify UI, which proxies /api here).
+# Set FRONTEND_ORIGINS="https://your-site.netlify.app" on Render.
+FRONTEND_ORIGINS = (["http://localhost:5174"] if DEBUG else []) + env_list("FRONTEND_ORIGINS")
+
+# Render terminates HTTPS in front of gunicorn.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 
 # Application definition
@@ -161,9 +172,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 AUTH_USER_MODEL = "accounts.User"
 
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5174",
-]
+CORS_ALLOWED_ORIGINS = FRONTEND_ORIGINS
 
 # --- Auth cookie & CSRF -------------------------------------------------------
 # The UI calls the API through its own origin (/api, proxied), so cookies are first-party.
@@ -172,7 +181,7 @@ AUTH_COOKIE_SECURE = not DEBUG  # HTTPS-only outside local development.
 AUTH_COOKIE_SAMESITE = "Lax"
 AUTH_TOKEN_TTL = timedelta(days=14)
 
-CSRF_TRUSTED_ORIGINS = ["http://localhost:5174"]
+CSRF_TRUSTED_ORIGINS = FRONTEND_ORIGINS
 CSRF_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_HTTPONLY = False  # The UI reads it to send the X-CSRFToken header.
