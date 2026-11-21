@@ -73,6 +73,21 @@ FRONTEND_ORIGINS = list(dict.fromkeys(
 # Render terminates HTTPS in front of gunicorn.
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
+# Production hardening (no effect locally, where DEBUG is on).
+if not DEBUG:
+    # Browsers only use HTTPS for this host from now on. Start at 30 days; raise to a
+    # year (31536000) once everything is confirmed working over HTTPS.
+    SECURE_HSTS_SECONDS = config("SECURE_HSTS_SECONDS", default=60 * 60 * 24 * 30, cast=int)
+    SESSION_COOKIE_SECURE = True  # Django admin login cookie: HTTPS only.
+SESSION_COOKIE_SAMESITE = "Lax"
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = "same-origin"
+X_FRAME_OPTIONS = "DENY"  # Nothing here should be shown inside another site's frame.
+
+# Django admin lives at a non-default path so bots scanning /admin/ don't find it.
+# Override with ADMIN_URL="something-else/" (keep the trailing slash).
+ADMIN_URL = config("ADMIN_URL", default="bk-staff/")
+
 
 # Application definition
 
@@ -128,14 +143,7 @@ WSGI_APPLICATION = 'config.wsgi.application'
 raw_url = config("DATABASE_URL", default=None)
 DATABASES = {"default": dj_database_url.parse(raw_url, conn_max_age=0)}
 
-# DATABASES = {
-#     "default": {
-#         "ENGINE": "django.db.backends.postgresql_psycopg2",
-#         "NAME": "beccaKitchen",
-#         "USER": "postgres",
-#         "PASSWORD": "mbdask1013",
-#     },
-# }
+# Local Postgres: set DATABASE_URL in .env, e.g. postgres://postgres:<password>@localhost:5432/beccaKitchen
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
@@ -205,4 +213,10 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.AllowAny",
     ],
+    # Used by the login/register views (accounts/throttles.py).
+    "DEFAULT_THROTTLE_RATES": {
+        "login": "10/min",        # per IP
+        "login_email": "10/hour",  # per account email, from any IP
+        "register": "20/hour",     # per IP
+    },
 }
