@@ -1,5 +1,7 @@
 
 from django.contrib.auth import authenticate
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
 from .allergens import ALLERGENS
@@ -39,7 +41,8 @@ class FavoriteSerializer(serializers.ModelSerializer):
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(
         write_only=True,
-        min_length=8
+        min_length=8,
+        max_length=128,  # Hashing very long passwords is slow; cap it.
     )
 
     class Meta:
@@ -50,9 +53,26 @@ class RegisterSerializer(serializers.ModelSerializer):
             "last_name",
             "password",
         ]
+        # The model's unique check is case-sensitive and runs before validate_email,
+        # so "Parent@x.com" slipped past it and crashed on the database constraint.
+        # validate_email below does a case-insensitive check instead.
+        extra_kwargs = {"email": {"validators": []}}
 
     def validate_email(self, value):
-        return value.lower().strip()
+        email = value.lower().strip()
+        if User.objects.filter(email__iexact=email).exists():
+            raise serializers.ValidationError("An account with this email already exists.")
+        return email
+
+    def validate(self, attrs):
+        # Django's password rules from settings (common passwords, all-numeric,
+        # too similar to the name/email, minimum length).
+        candidate = User(email=attrs.get("email", ""), first_name=attrs.get("first_name", ""), last_name=attrs.get("last_name", ""))
+        try:
+            validate_password(attrs["password"], user=candidate)
+        except DjangoValidationError as error:
+            raise serializers.ValidationError({"password": list(error.messages)})
+        return attrs
 
     def create(self, validated_data):
         password = validated_data.pop("password")
@@ -65,7 +85,7 @@ class RegisterSerializer(serializers.ModelSerializer):
 
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
-    password = serializers.CharField(write_only=True)
+    password = serializers.CharField(write_only=True, max_length=128)
 
     def validate(self, attrs):
         email = attrs["email"].lower().strip()
@@ -104,7 +124,7 @@ class DeliverySerializer(serializers.Serializer):
     city = serializers.CharField(max_length=100)
     state = serializers.CharField(max_length=50)
     zip_code = serializers.CharField(max_length=20)
-    delivery_instructions = serializers.CharField(required=False, allow_blank=True)
+    delivery_instructions = serializers.CharField(max_length=500, required=False, allow_blank=True)
 
 
 class OrderCreateSerializer(serializers.Serializer):
@@ -185,6 +205,7 @@ class ChildSerializer(serializers.ModelSerializer):
         model = Child
         fields = ["id", "name", "birth_date", "allergens", "allergy_notes", "created_at", "updated_at"]
         read_only_fields = ["id", "created_at", "updated_at"]
+        extra_kwargs = {"allergy_notes": {"max_length": 1000}}
 
     def validate_allergens(self, value):
         return sorted(set(value))

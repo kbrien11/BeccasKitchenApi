@@ -1,3 +1,5 @@
+from django.core.cache import cache
+from django.urls import reverse
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APITestCase
 
@@ -167,7 +169,7 @@ class OrderAdminAuditTests(APITestCase):
         form["events-0-id"] = str(order.events.first().pk)
         form["events-0-order"] = str(order.pk)
 
-        response = browser.post(f"/admin/accounts/order/{order.pk}/change/", form)
+        response = browser.post(reverse("admin:accounts_order_change", args=[order.pk]), form)
         self.assertEqual(response.status_code, 302, getattr(response, "context", None) and response.context.get("errors"))
 
         order.refresh_from_db()
@@ -318,6 +320,7 @@ class CookieAuthTests(APITestCase):
     def setUp(self):
         from rest_framework.test import APIClient
 
+        cache.clear()  # Reset login rate limits between tests.
         self.browser = APIClient(enforce_csrf_checks=True)
         self.user = User.objects.create_user(email="parent@example.test", password="test-pass-123")
 
@@ -411,6 +414,7 @@ class ProxiedOriginCsrfTests(APITestCase):
     def setUp(self):
         from rest_framework.test import APIClient
 
+        cache.clear()
         self.browser = APIClient(enforce_csrf_checks=True)
         User.objects.create_user(email="parent@example.test", password="test-pass-123")
         self.browser.post("/api/auth/login/", {"email": "parent@example.test", "password": "test-pass-123"}, format="json")
@@ -430,3 +434,59 @@ class ProxiedOriginCsrfTests(APITestCase):
         response = self.post_child("https://evil.example")
         self.assertEqual(response.status_code, 403)
         self.assertIn("Origin checking failed", str(response.data["detail"]))
+
+
+class SignInHardeningTests(APITestCase):
+    """Rate limits, password rules and email normalisation on login/register."""
+
+    def setUp(self):
+        cache.clear()
+        User.objects.create_user(email="parent@example.test", password="test-pass-123")
+
+    def register(self, email="new@example.test", password="long-enough-1"):
+        return self.client.post(
+            "/api/auth/register/",
+            {"email": email, "first_name": "Nora", "last_name": "Park", "password": password},
+            format="json",
+        )
+
+    def test_login_is_rate_limited_per_account(self):
+        for _ in range(10):
+            self.client.post("/api/auth/login/", {"email": "parent@example.test", "password": "wrong"}, format="json")
+        # Different-looking IPs don't help: the account itself is capped.
+        response = self.client.post(
+            "/api/auth/login/", {"email": "PARENT@example.test", "password": "test-pass-123"},
+            format="json", REMOTE_ADDR="10.9.9.9",
+        )
+        self.assertEqual(response.status_code, 429)
+
+    def test_login_is_rate_limited_per_ip(self):
+        for i in range(10):
+            self.client.post("/api/auth/login/", {"email": f"guess{i}@example.test", "password": "x"}, format="json")
+        response = self.client.post("/api/auth/login/", {"email": "parent@example.test", "password": "test-pass-123"}, format="json")
+        self.assertEqual(response.status_code, 429)
+
+    def test_register_rejects_weak_passwords(self):
+        for weak in ["password1", "12345678901", "qwertyuiop"]:
+            response = self.register(password=weak)
+            self.assertEqual(response.status_code, 400, weak)
+            self.assertIn("password", response.data)
+
+    def test_register_with_existing_email_in_other_case_is_a_clean_400(self):
+        response = self.register(email="Parent@Example.test")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("email", response.data)
+        self.assertEqual(User.objects.filter(email__iexact="parent@example.test").count(), 1)
+
+    def test_admin_is_not_at_the_default_path(self):
+        self.assertEqual(self.client.get("/admin/").status_code, 404)
+        self.assertEqual(self.client.get(reverse("admin:index")).status_code, 302)  # -> admin login
+
+
+class TextLengthLimitTests(APITestCase):
+    def test_allergy_notes_are_capped(self):
+        user = User.objects.create_user(email="parent@example.test", password="test-pass-123")
+        self.client.force_authenticate(user)
+        response = self.client.post("/api/auth/me/children/", {"name": "Ava", "allergy_notes": "x" * 1001}, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("allergy_notes", response.data)

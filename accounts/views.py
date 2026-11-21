@@ -2,6 +2,7 @@ from django.shortcuts import render
 
 # Create your views here.
 
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework import status
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.views import APIView
@@ -10,6 +11,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import ensure_csrf_cookie
 
+from .throttles import LoginEmailThrottle
 from .auth_cookies import clear_auth_cookie, issue_token, set_auth_cookie
 
 from .serializers import (
@@ -31,6 +33,8 @@ from .orders import OrderError, balance_for, change_status, place_order
 
 class RegisterView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "register"
 
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
@@ -53,6 +57,9 @@ class RegisterView(APIView):
 
 class LoginView(APIView):
     permission_classes = [AllowAny]
+    # Per IP and per account, so one account can't be password-guessed from many IPs.
+    throttle_classes = [ScopedRateThrottle, LoginEmailThrottle]
+    throttle_scope = "login"
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
